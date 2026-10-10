@@ -178,4 +178,10 @@ I also learned that the safest solution isn't always to make another change. Whe
 - [Screenshot provenance and publishing checklist](docs/evidence-manifest.md)
 - [Sanitized SSH hardening example](configs/01-homelab-hardening.conf)
 
+### Related Projects
+
+**[Lab 01.5 — Secure Remote Access with Tailscale](https://github.com/KingRichardVII/tailscale-secure-remote-access)**
+
+Extended this Linux environment with secure remote access using Tailscale. Configured manual device approval, a least-privilege SSH access policy, and separate SSH keys for my laptop. Validated remote administration from an external network without router port forwarding.
+
 **Privacy:** Published screenshots were reviewed and sanitized to reduce unnecessary exposure of personal and network information. Original screenshots are retained privately. Sanitization reduces information exposure but does not eliminate every security risk.
