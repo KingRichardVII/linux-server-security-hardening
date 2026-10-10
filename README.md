@@ -2,9 +2,7 @@
 
 **Lab 01 · Proxmox VE · Ubuntu Server 26.04 LTS · Linux access control · OpenSSH · UFW · systemd · journalctl · LVM**
 
-Built and secured an Ubuntu Linux server within a dedicated Proxmox virtualization homelab to gain practical experience in Linux administration, system hardening, access control, and security-event investigation.
-
-Implemented and tested least-privilege permissions, key-based SSH authentication, default-deny firewalling, systemd service administration, and Linux authentication-log analysis. Performed storage expansion, kernel patching, and post-change validation to verify system availability and security controls.
+I built and secured an Ubuntu Server virtual machine using Proxmox VE. The goal was to create a Linux environment where I could practice real-world system administration, implement security controls, troubleshoot issues, and verify that my configurations worked as intended.
 
 ## Objective
 
@@ -45,7 +43,7 @@ This diagram shows the lab's logical relationships, not public Internet exposure
 
 ## Security controls and validation
 
-Security controls were implemented using Linux-native administration tools and validated through controlled testing. Rather than relying solely on configuration files, the lab evaluated expected behavior through successful and denied access attempts, system logs, service-state checks, and post-change verification.
+Security controls were implemented using Linux-native administration tools and validated through controlled testing. I didn't want to assume a security control was working just because the configuration looked correct. I tested both successful and denied access, reviewed system logs, checked running services, and verified that the controls still worked after making changes.
 
 The implementation focused on three primary security objectives: **least-privilege access to shared resources**, **key-based remote administration**, and **default-deny inbound network traffic**.
 
@@ -141,7 +139,7 @@ Post-reboot tests confirmed:
 
 ## Troubleshooting highlights
 
-Three unexpected administrative challenges required investigating the actual system state before deciding what to change:
+I encountered three issues that required troubleshooting. Instead of immediately changing settings, I used Linux tools to investigate what was happening and determine the safest way to resolve each problem.
 
 | Challenge | Evidence and diagnosis | Resolution |
 | --- | --- | --- |
@@ -153,9 +151,8 @@ See the [full troubleshooting notes](docs/troubleshooting.md) for the command-le
 
 ## Lessons learned
 
-Security administration requires more than applying a configuration. **Changes must be understood, tested, verified, and documented.** Throughout this lab, I learned to distinguish intended policy from runtime behavior, investigate unexpected results using system tools and logs, and choose remediation based on observed impact rather than assumptions.
-
-In particular, active login sessions can retain old group memberships; LVM allocation and filesystem capacity are separate layers; a systemd unit's enabled state is not its runtime state; and successful administration includes knowing **when not to make a risky change**. Patching also requires previewing the transaction, maintaining a recovery option, and retesting critical access controls afterward.
+My biggest takeaway from this lab is that configuring a system is only half the job. You also need to understand why a configuration works, test whether it behaves as expected, and know how to troubleshoot it when something goes wrong.
+I also learned that the safest solution isn't always to make another change. When I accidentally extended the root logical volume farther than planned, I investigated the storage layout before deciding how to proceed. That experience reinforced the importance of verifying system state and understanding the risks before making changes.
 
 ## Scope and limitations
 
@@ -181,4 +178,4 @@ In particular, active login sessions can retain old group memberships; LVM alloc
 - [Screenshot provenance and publishing checklist](docs/evidence-manifest.md)
 - [Sanitized SSH hardening example](configs/01-homelab-hardening.conf)
 
-**Privacy:** Published screenshots are sanitized copies: exact workstation/server IPs, the Windows user profile path, the Proxmox-displayed IPv6 address, and logged MAC/device identifiers have been obscured with opaque masks. The IPv4 subnet rule (`192.168.0.0/24`), generic lab usernames, and security evidence remain visible. One SSH login banner was omitted for readability and explicitly marked. Original screenshots are **not** included. Sanitation reduces information exposure but is not a guarantee against threat actors; complete a final human review before publishing.
+**Privacy:** Published screenshots were reviewed and sanitized to reduce unnecessary exposure of personal and network information. Original screenshots are retained privately. Sanitization reduces information exposure but does not eliminate every security risk.
