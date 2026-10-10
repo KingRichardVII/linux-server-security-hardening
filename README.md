@@ -1,187 +1,186 @@
 # Linux Server Administration & Security Hardening
 
-**Lab 01 · Proxmox VE · Ubuntu Server 26.04 LTS · Linux access control · OpenSSH · UFW · systemd · journalctl · LVM**
+**Lab 01 | Proxmox VE | Ubuntu Server | Linux permissions | OpenSSH | UFW | systemd | LVM**
 
-I built and secured an Ubuntu Server virtual machine using Proxmox VE. The goal was to create a Linux environment where I could practice real-world system administration, implement security controls, troubleshoot issues, and verify that my configurations worked as intended.
+I built and secured an Ubuntu Server virtual machine on my dedicated Proxmox homelab. My goal was to get comfortable managing a real Linux system, understand how its security controls work, and learn how to troubleshoot problems when things don't go as planned.
 
-## Objective
+I didn't want to stop at changing configuration files. For each major security control, I checked what the system was actually doing: who could access a directory, which SSH login methods worked, what traffic the firewall allowed, and whether everything still worked after updates.
 
-Build a reusable Linux infrastructure foundation for a small enterprise-style security homelab, while demonstrating *configuration, verification, troubleshooting, and change management* rather than only successful installation.
+**The result:** A working Linux server with tested user permissions, key-based SSH, a default-deny firewall, authentication-log investigation, and documented administration and maintenance work.
 
-## Architecture
+## My homelab setup
+
+| Component | What I used |
+| --- | --- |
+| Physical host | Dedicated HP ProDesk running Proxmox VE |
+| Virtual machine | `linux01` — Ubuntu Server 26.04 LTS |
+| VM resources | 2 vCPUs, 2 GiB RAM, 32 GiB virtual disk |
+| Network | Bridged private LAN (`vmbr0` on Proxmox, `ens18` on Ubuntu) |
+| Storage | SSD-backed VM storage; LVM and ext4 inside Ubuntu |
+| Administration | Windows PowerShell and OpenSSH; Proxmox console as a backup way in |
+
+### How it fits together
 
 ```mermaid
 flowchart TD
-    A["Windows administration workstation"] -->|"SSH · TCP/22"| B["Private lab LAN · 192.168.0.0/24"]
-    B -->|"Bridged networking · vmbr0"| D["linux01 · Ubuntu Server · ens18"]
-    B -->|"Separate management access"| C["Proxmox VE host"]
-    C -.->|"Hosts the virtual machine"| D
-    J["SSD · local-lvm · virtual disk"] --- C
-    K["HDD · lab-storage · ISOs/backups"] --- C
-    D --> E["UFW · default-deny inbound"]
-    E --> F["OpenSSH · key-only authentication"]
-    D --> G["POSIX groups · SecOps share · setgid"]
-    D --> H["systemd / journalctl · service and auth events"]
-    D --> I["LVM · ext4 root filesystem"]
+    A["Windows administration workstation"] -->|"SSH / TCP 22"| B["Private home LAN"]
+    B -->|"Bridged networking / vmbr0"| D["linux01 / Ubuntu Server"]
+    B -->|"Separate management connection"| C["Proxmox VE host"]
+    C -.->|"Hosts the VM"| D
+    J["SSD / VM storage"] --- C
+    K["HDD / ISO and backup storage"] --- C
+    D --> E["UFW / inbound firewall"]
+    E --> F["OpenSSH / key-based login"]
+    D --> G["Users, groups, and file permissions"]
+    D --> H["Services and security logs"]
+    D --> I["LVM / ext4 filesystem"]
 ```
 
-This diagram shows the lab's logical relationships, not public Internet exposure. Only the private subnet is shown; exact host addresses are redacted from published screenshots; **no Proxmox management or SSH ports were intentionally forwarded to the public Internet**.
+The diagram shows how the lab is connected, not a publicly exposed network. I did not intentionally forward SSH or Proxmox management ports through my home router.
 
 ![Proxmox VM summary](screenshots/infrastructure-proxmox-linux01.png)
-*Figure 1 — Proxmox VM dashboard showing the running Ubuntu server and its allocated resources.*
 
-## Environment
+*Figure 1 — The Ubuntu VM running in my Proxmox homelab.*
 
-| Component | Implementation |
-| --- | --- |
-| Hypervisor | Proxmox VE on dedicated HP ProDesk hardware |
-| Guest | Ubuntu Server 26.04 LTS (`linux01`), 2 vCPU, 2 GiB RAM, 32 GiB virtual disk |
-| Storage | Proxmox SSD-backed VM storage; ext4 root filesystem on LVM within the guest |
-| Network | Bridged VM NIC (`ens18`), private home subnet |
-| Administration | Windows PowerShell / OpenSSH client; Proxmox console retained as recovery path |
-| Security | Linux users/groups, setgid, UFW, key-based SSH, systemd journal |
+## What I built and tested
 
-## Security controls and validation
+### 1. Made a shared directory accessible only to the right users
 
-Security controls were implemented using Linux-native administration tools and validated through controlled testing. I didn't want to assume a security control was working just because the configuration looked correct. I tested both successful and denied access, reviewed system logs, checked running services, and verified that the controls still worked after making changes.
+I created a `secops` group and a shared folder at `/srv/secops-share`. I wanted Alice and my administrator account to be able to work together without giving everyone on the server access.
 
-The implementation focused on three primary security objectives: **least-privilege access to shared resources**, **key-based remote administration**, and **default-deny inbound network traffic**.
+The directory uses `root:secops` ownership and permissions of `2770`. The `2` enables **setgid**, which means newly created files inherit the directory's group. I also learned that this doesn't automatically fix the group ownership of files that already exist.
 
-### 1. Group-based authorization and least privilege
+Rather than assume the permissions were correct, I tested them with three accounts:
 
-Created an authorized `secops` group and a shared workspace at `/srv/secops-share`, owned by `root:secops`. Configured mode `2770` so group members can collaborate while other users are denied traversal. The setgid directory bit makes **new files inherit the directory's group**; pre-existing files required separate `chgrp` correction.
-
-Validated the policy using three separate identities rather than relying only on ownership and mode bits:
-
-| Test identity | `secops` member? | Observed result |
+| Account | Expected access | What happened |
 | --- | --- | --- |
-| `alice` | Yes | Access and file creation permitted |
-| `richard` | Yes | Access and cross-user file edits permitted |
-| `bob` | No | Directory listing, traversal, reading, and file creation denied |
-
-When `richard` was first added to `secops`, an existing SSH session retained its old group credentials. A new login refreshed the supplementary groups and resolved the authorization mismatch; see [Troubleshooting](docs/troubleshooting.md).
+| `alice` | Allowed | Could open the directory and create files |
+| `richard` | Allowed | Could access the directory and collaborate on files |
+| `bob` | Denied | Couldn't list, enter, read from, or create files in the directory |
 
 ![Setgid before and after](screenshots/linux-setgid-directory-before-after.png)
-*Figure 2 — Directory permissions changed from 770 to 2770 (`drwxrws---`).*
+
+*Figure 2 — Changed the shared directory from `770` to `2770` to enable group inheritance.*
 
 ![Denied access](screenshots/linux-unauthorized-access-denied.png)
-*Figure 3 — Unauthorized account denied access to SecOps resources.*
 
-### 2. SSH authentication hardening
+*Figure 3 — Bob's account was denied access to the protected folder.*
 
-Established a passphrase-protected Ed25519 SSH key pair on the Windows client and installed the public key into `richard`'s `authorized_keys`. Inspection found that `/etc/ssh/sshd_config.d/50-cloud-init.conf` explicitly set `PasswordAuthentication yes`. To avoid modifying the managed file directly, created an earlier-loading `01-homelab-hardening.conf` and verified that its settings took effect using `sshd -T`.
+### 2. Secured SSH without locking myself out
 
-Effective policy: `PermitRootLogin no`, `PasswordAuthentication no`, `PubkeyAuthentication yes`, `KbdInteractiveAuthentication no`.
+SSH is how I normally administer Ubuntu from my Windows computer. I generated a passphrase-protected **Ed25519 SSH key** and configured the server to accept public-key authentication while disabling password-based and root SSH login.
 
-Validation tested **both sides of the authentication policy**, not just its syntax: after `sshd -t` succeeded and the service was reloaded, a new Ed25519 public-key-only connection succeeded, while a separate password-only connection returned `Permission denied (publickey)` without prompting for the account password.
+I ran into a problem: an existing cloud-init configuration file was still enabling password authentication. Instead of editing that managed file, I created an earlier-loading SSH configuration file and used `sshd -t` and `sshd -T` to check that the settings were valid and actually took effect.
+
+My final SSH settings included:
+
+```text
+PermitRootLogin no
+PasswordAuthentication no
+PubkeyAuthentication yes
+KbdInteractiveAuthentication no
+```
+
+Then I tested both outcomes: **the SSH key worked, and password-only login was rejected**. I kept my existing SSH session and the Proxmox console available while making changes.
 
 ![Effective SSH configuration](screenshots/ssh-effective-hardening-settings.png)
-*Figure 4 — `sshd -T` effective settings after configuration validation.*
 
-| Allowed authentication | Denied authentication |
+*Figure 4 — Confirmed the SSH settings the server was actually using.*
+
+| SSH key allowed | Password-only login denied |
 | --- | --- |
-| ![Key-only SSH succeeded](screenshots/ssh-public-key-allowed.png) | ![Password-only SSH rejected](screenshots/ssh-password-only-denied.png) |
-| **Public key: ALLOW** | **Password only: DENY** |
+| ![Key-based login succeeds](screenshots/ssh-public-key-allowed.png) | ![Password-only login fails](screenshots/ssh-password-only-denied.png) |
 
-**Safety:** Existing SSH session and hypervisor console remained available during changes. `sshd -t` passed before a service reload. Public and private SSH keys are **not included** in this repository.
+### 3. Configured a default-deny host firewall
 
-### 3. Host firewall
+I enabled **UFW** to deny incoming connections by default, while allowing SSH on TCP/22 from my trusted home subnet (`192.168.0.0/24`).
 
-Enabled UFW with **deny incoming / allow outgoing** and an explicit allow rule for SSH TCP/22 originating from `192.168.0.0/24`. Verified an authorized *new* SSH connection from that subnet could succeed after activating UFW. Also observed logged blocks of multicast/IGMP packets, providing evidence that the firewall blocked some traffic; those events are **not evidence of malicious activity**.
-
-**Validation boundary:** The exercise did **not** include a controlled denied SSH connection from outside the permitted subnet. The policy was inspected and permitted access was tested, but broader TCP denial must not be described as independently tested.
+After enabling the firewall, I opened a new SSH connection to make sure I hadn't blocked my own access. I also saw the firewall log blocked IGMP traffic, which was ordinary network activity—not evidence of an attack.
 
 ![UFW policy](screenshots/ufw-active-policy.png)
-*Figure 5 — UFW activated with an IPv4 subnet-scoped SSH exception.*
 
-See [Security controls and limitations](docs/security-controls.md) for IPv6 and remote-access considerations.
+*Figure 5 — UFW active with a subnet-restricted SSH rule.*
 
-### 4. SSH authentication log investigation
+I confirmed that authorized LAN SSH worked, but I **did not** independently test an SSH connection being denied from an outside subnet during this lab.
 
-Generated a **controlled failed SSH password attempt before switching to key-only authentication**. Queried the systemd journal and extracted the timestamp, targeted account, source IP (masked in the published image), source port, authentication result, and connection-reset event. The logs show observable authentication events; they do not independently establish the operator's identity or intent.
+### 4. Investigated a failed SSH login
+
+Before disabling password authentication, I deliberately generated a failed SSH login and investigated the event with `journalctl -u ssh -n 5`.
+
+I could see the account being targeted, the source address, the timestamp, the failed authentication, and the connection ending. This was my introduction to looking at Linux logs as security evidence rather than just error messages.
 
 ![Failed SSH event](screenshots/ssh-failed-login-journal.png)
-*Figure 6 — Investigated a deliberately generated failed SSH authentication event with `journalctl -u ssh -n 5`.*
 
-### 5. Storage expansion
+*Figure 6 — A controlled failed login recorded in Ubuntu's SSH journal.*
 
-Investigated the guest storage hierarchy: virtual disk → partition `/dev/sda3` → LVM physical volume → volume group `ubuntu-vg` → logical volume `ubuntu-lv` → ext4 mounted at `/`.
+### 5. Expanded the server's storage
 
-The root filesystem was increased from **15G to 25G** online, with **5G remaining free in the volume group**. Logical-volume growth and ext4 filesystem growth were verified separately.
+I used `lsblk`, `pvs`, `vgs`, `lvs`, and `df -h` to understand how Ubuntu's virtual disk, logical volume, and filesystem fit together.
 
-| Before: root 15G, VG free ~15G | After: root 25G, VG free ~5G |
+The root filesystem started at about **15 GiB**. My plan was to add 5 GiB, but I accidentally ran the relative LVM expansion command twice. That left a **25 GiB logical volume** while the filesystem was still at its original size.
+
+Instead of trying to shrink a live root volume, I checked the actual storage layout and used `resize2fs` to expand ext4 to match. The root filesystem ended up at about **25 GiB**, with around **5 GiB still free in the volume group**.
+
+| Before: 15 GiB root filesystem | After: 25 GiB root filesystem |
 | --- | --- |
-| ![LVM before](screenshots/lvm-before.png) | ![LVM after](screenshots/lvm-after.png) |
+| ![Before storage expansion](screenshots/lvm-before.png) | ![After storage expansion](screenshots/lvm-after.png) |
 
-The initial plan was to grow by 5G, but the relative `+5G` extension was accidentally executed twice. Instead of a risky reduction on a live root LV, the enlarged allocation was retained and ext4 was expanded to match. The incident is documented in [Troubleshooting](docs/troubleshooting.md).
+This mistake taught me why it's important to verify the system's current state before attempting another change.
 
-### 6. Service administration and recovery
+### 6. Managed services, updates, and recovery checkpoints
 
-Inspected and managed `chrony.service` via `systemctl` and `pgrep`, reviewed its lifecycle with `journalctl -u chrony`, restored it after a controlled stop, and checked NTP tracking with `chronyc tracking`. Distinguished **enabled versus active** and **administrative shutdown versus service failure**.
+I used `systemctl`, `journalctl`, `pgrep`, and `chronyc` to inspect services and investigate their logs. I deliberately stopped and restarted Chrony to understand how a service behaves, including the difference between **enabled** and **running**.
 
-### 7. Patch management and post-change validation
+I also reviewed and installed system updates. Before the kernel upgrade, I created a temporary Proxmox snapshot as a rollback checkpoint. After upgrading and rebooting, I checked that:
 
-Refreshed APT metadata, reviewed upgrades, simulated upgrade transactions, and performed package maintenance. When kernel metapackages required additional dependencies, simulated `apt-get --with-new-pkgs upgrade`, established a short-lived Proxmox snapshot checkpoint, installed kernel version `7.0.0-38-generic`, then rebooted.
-
-Post-reboot tests confirmed:
-
-- `uname -r` reported `7.0.0-38-generic`.
-- `systemctl --failed` reported **zero failed units**.
-- SSH and chrony were active.
-- UFW was active with the intended SSH subnet exception.
-- Effective SSH settings remained hardened.
-- Root filesystem remained approximately **25G**.
+- The running kernel was `7.0.0-38-generic`.
+- There were **zero failed systemd units**.
+- SSH and Chrony were running.
+- UFW and the SSH security settings were still in place.
+- The root filesystem was still about **25 GiB**.
 
 ![Post-patch validation](screenshots/post-kernel-upgrade-validation.png)
-*Figure 7 — Kernel and key security controls independently verified after reboot.*
 
-**Update limitation:** Five packages were still deferred by Ubuntu's phased-update mechanism during the recorded patching session. The report does **not** claim the system had zero outstanding updates.
+*Figure 7 — Verified the server and its security settings after the kernel update.*
 
-## Troubleshooting highlights
+At that checkpoint, five Ubuntu updates were still deferred by phased rollout, so I'm **not claiming the server was fully patched**.
 
-I encountered three issues that required troubleshooting. Instead of immediately changing settings, I used Linux tools to investigate what was happening and determine the safest way to resolve each problem.
+## Problems I ran into
 
-| Challenge | Evidence and diagnosis | Resolution |
-| --- | --- | --- |
-| **New `secops` membership did not grant access in an existing session** | `getent group secops` listed `richard`, but `id` in the current SSH session did not; directory access was denied. | Started a fresh login session, verified updated supplementary groups, and successfully accessed the protected directory. |
-| **SSH settings conflicted with a cloud-init drop-in** | `/etc/ssh/sshd_config.d/50-cloud-init.conf` explicitly enabled password authentication. The effective server configuration, rather than file contents alone, was the source of truth. | Created an earlier-loading `01-homelab-hardening.conf`, validated it with `sshd -t` and `sshd -T`, reloaded SSH, and tested key-only ALLOW versus password-only DENY. |
-| **Root LV was extended farther than planned** | A relative `lvextend -L +5G` operation was issued twice. `lvs`, `vgs`, and `df -h /` showed a ~25G logical volume while ext4 still occupied ~15G. | Avoided an unnecessary live-root volume reduction; grew ext4 online with `resize2fs`, verified a ~25G root filesystem, and retained ~5G unallocated in the VG. |
+Three challenges stood out:
 
-See the [full troubleshooting notes](docs/troubleshooting.md) for the command-level context, plus the controlled chrony lifecycle and kernel-log triage exercises.
+| Problem | What I learned or changed |
+| --- | --- |
+| My new `secops` membership didn't work in the current SSH session | Group changes aren't always reflected in an already-open session. Logging in again fixed it. |
+| SSH wasn't using the password setting I expected | I checked which configuration file took precedence, fixed the override, and tested the effective settings. |
+| I extended the logical volume farther than planned | I checked the logical volume and filesystem separately, avoided a risky shrink, and completed the filesystem expansion safely. |
 
-## Lessons learned
+I documented the commands, investigation, and fixes in [my troubleshooting notes](docs/troubleshooting.md).
 
-My biggest takeaway from this lab is that configuring a system is only half the job. You also need to understand why a configuration works, test whether it behaves as expected, and know how to troubleshoot it when something goes wrong.
-I also learned that the safest solution isn't always to make another change. When I accidentally extended the root logical volume farther than planned, I investigated the storage layout before deciding how to proceed. That experience reinforced the importance of verifying system state and understanding the risks before making changes.
+## What I learned
 
-## Scope and limitations
+My biggest takeaway is that **configuring a server is only half the job**. I also need to understand why something works, test whether it behaves the way I expect, and know how to investigate when it doesn't.
 
-- **Educational environment:** This is a homelab, not a production deployment, a complete CIS/NIST compliance assessment, or evidence of production operations.
-- **Firewall tests:** Authorized LAN SSH connectivity and actual IGMP packet blocks were observed. A controlled denied-SSH test from outside `192.168.0.0/24`, including an independent IPv6 negative test, was **not** performed. The LAN-wide allowance is not per-device authorization.
-- **Pending packages:** Five upgrades remained deferred by Ubuntu's phased-update mechanism at the recorded patching checkpoint; the system is **not** claimed to be fully patched.
-- **Recovery:** The pre-kernel-upgrade Proxmox snapshot was a temporary rollback checkpoint, **not** a complete or independently tested backup strategy.
-- **Troubleshooting scope:** Chrony was intentionally stopped and restored in a controlled service-lifecycle exercise; this was **not** an unexpected production outage. The KHO message had no demonstrated operational impact and was not "fixed" without evidence.
-- **Technology scope:** SIEM, EDR, Entra ID, Proofpoint, and vulnerability-scanning tools were **not deployed as part of Lab 01**.
+The storage mistake was a particularly useful lesson. Making another change immediately might have made things worse. Checking the actual system state first gave me a safer way forward.
 
-## Next steps
+## What this lab does and doesn't cover
 
-1. Secure remote access via a VPN overlay (Tailscale), without exposing management ports publicly.
-2. Splunk Enterprise: centrally collect and investigate Linux authentication/system events.
-3. Email security: headers, SPF, DKIM, DMARC, and Proofpoint-informed InfoSec workflows.
-4. Continue segmented networking, AD/Entra ID, endpoint telemetry, and vulnerability-management labs in the same infrastructure.
+This is an educational homelab, not a production deployment or a formal security-compliance assessment. I verified specific user permissions, SSH authentication behavior, authorized LAN SSH, service health, and post-update settings. I did **not** independently test every possible firewall path, complete an IPv6 denial test, or perform full vulnerability or compliance scanning.
 
-## Supporting documentation
+The Proxmox snapshot was a temporary recovery checkpoint, **not a replacement for backups**. I also did not deploy a SIEM, EDR, or enterprise identity platform as part of this lab.
 
-- [Implementation notes](docs/implementation.md)
-- [Security controls and limitations](docs/security-controls.md)
-- [Troubleshooting and lessons](docs/troubleshooting.md)
-- [Screenshot provenance and publishing checklist](docs/evidence-manifest.md)
-- [Sanitized SSH hardening example](configs/01-homelab-hardening.conf)
+## Documentation
 
-### Related Projects
+- [Implementation and commands](docs/implementation.md)
+- [Security controls and test boundaries](docs/security-controls.md)
+- [Troubleshooting notes](docs/troubleshooting.md)
+- [Screenshot and privacy notes](docs/evidence-manifest.md)
+- [Example SSH configuration](configs/01-homelab-hardening.conf)
 
-**[Lab 01.5 — Secure Remote Access with Tailscale](https://github.com/KingRichardVII/tailscale-secure-remote-access)**
+**Privacy:** The published screenshots are sanitized copies. I kept my original screenshots private and removed unnecessary identifying information from the public versions. Sanitization reduces exposure, but it doesn't eliminate every security risk.
 
-Extended this Linux environment with secure remote access using Tailscale. Configured manual device approval, a least-privilege SSH access policy, and separate SSH keys for my laptop. Validated remote administration from an external network without router port forwarding.
+## Continuing the homelab
 
-**Privacy:** Published screenshots were reviewed and sanitized to reduce unnecessary exposure of personal and network information. Original screenshots are retained privately. Sanitization reduces information exposure but does not eliminate every security risk.
+**[Lab 01.5 — Secure Remote Access with Tailscale](https://github.com/KingRichardVII/tailscale-secure-remote-access)** builds directly on this server. I added manual device approval, limited Tailscale access to SSH, and successfully connected from my laptop using a cellular hotspot without opening a public SSH port.
+
+My next major project is **Splunk SIEM and Linux Security Monitoring**, where I'll start collecting and investigating security events centrally.
