@@ -1,0 +1,16 @@
+*.key
+id_ed25519*
+*.pem
+*.p12
+*.pfx
+.env
+*.secret
+.DS_Store
+
+# Do not commit raw evidence archives or temporary review files
+*.zip
+*.7z
+*.tar
+*.tar.gz
+*_raw.*
+*.bak
